@@ -28,7 +28,7 @@ impl ECX509Cert {
             pem.tag() == "CERTIFICATE"
         })?))
     }
-
+    #[allow(unused)]
     pub fn from_der(der: Vec<u8>) -> Self {
         Self(vec![der])
     }
@@ -121,13 +121,9 @@ impl ECPrivateKey {
 
         Ok(Self(der))
     }
-
+    #[allow(unused)]
     pub fn from_der(der: Vec<u8>) -> Self {
         Self(der)
-    }
-
-    pub fn get_num_certs(&self) -> usize {
-        self.0.len()
     }
 
     pub fn extract_publickey(&self) -> Result<Vec<u8>> {
