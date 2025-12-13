@@ -1,7 +1,5 @@
 mod ec;
 
-use std::fs;
-
 use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
@@ -17,7 +15,7 @@ use p256::SecretKey as P256SecretKey;
 use p384::SecretKey as P384SecretKey;
 use p521::SecretKey as P521SecretKey;
 
-use crate::ec::ECX509Cert;
+use crate::ec::{ECPrivateKey, ECX509Cert};
 
 /// Extract EC public key (uncompressed SEC1) from a PKCS#8 EC private key
 pub fn extract_ec_public_key_from_private_key(private_der: &[u8]) -> Result<Vec<u8>> {
@@ -253,20 +251,13 @@ pub fn extract_ec_public_key_from_cert_der(cert_der: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn test_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
-    // Read EC private key PEM
-    let pem_str = fs::read_to_string(privkey)?;
-    //print_ec384_private_key(&pem_str)?;
-
-    let list = get_list_der_from_pem(&pem_str, |pem| pem.tag() == "PRIVATE KEY")?;
-    let refs: Vec<&[u8]> = list.iter().map(|v| v.as_slice()).collect();
-    display_der(&refs);
-
-    let pubkey_from_priv = extract_ec_public_key_from_private_key(&list[0])?;
+    let private_key = ECPrivateKey::load_privatekey_pem(privkey)?;
+    let pubkey_from_priv = private_key.extract_publickey()?;
     display_der(&[&pubkey_from_priv]);
 
     let x509 = ECX509Cert::load_x509_pem(cert)?;
     let pubkey_from_cert = x509.extract_publickey(0)?;
-    display_der(&[&pubkey_from_priv]);
+    display_der(&[&pubkey_from_cert]);
 
     assert_eq!(pubkey_from_priv, pubkey_from_cert);
     Ok(())
@@ -274,7 +265,7 @@ fn test_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     test_ec("ec384-cert.pem", "ec384-private.pem")?;
-    //test_ec("ec256-cert.pem", "ec256-private.pem")?;
-    //test_ec("ec521-cert.pem", "ec521-private.pem")?;
+    test_ec("ec256-cert.pem", "ec256-private.pem")?;
+    test_ec("ec521-cert.pem", "ec521-private.pem")?;
     Ok(())
 }
