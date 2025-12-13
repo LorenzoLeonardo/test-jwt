@@ -1,0 +1,190 @@
+use std::{fs, path::Path};
+
+use anyhow::{Result, anyhow, bail};
+use elliptic_curve::sec1::ToEncodedPoint;
+use pkcs8::{
+    AssociatedOid, DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
+    der::{Decode, Encode},
+};
+
+use p256::SecretKey as P256SecretKey;
+use p384::SecretKey as P384SecretKey;
+use p521::SecretKey as P521SecretKey;
+
+use p256::NistP256;
+use p384::NistP384;
+use p521::NistP521;
+
+#[derive(Debug)]
+pub struct ECPrivateKey(Vec<u8>);
+
+impl ECPrivateKey {
+    pub fn load_privatekey_pem<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let pem_str = fs::read_to_string(path)?;
+
+        Self::from_pem(&pem_str)
+    }
+
+    pub fn from_pem(pem_str: &str) -> Result<Self> {
+        let ders = get_list_der_from_pem(pem_str, |pem| pem.tag() == "PRIVATE KEY")?;
+
+        let der = ders
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No PRIVATE KEY found in PEM"))?;
+
+        Ok(Self(der))
+    }
+    #[allow(unused)]
+    pub fn from_der(der: Vec<u8>) -> Self {
+        Self(der)
+    }
+
+    pub fn extract_publickey(&self) -> Result<Vec<u8>> {
+        let private_der = &self.0;
+        // Parse PKCS#8 only once
+        let pk_info = PrivateKeyInfo::from_der(private_der)?;
+        let params = pk_info
+            .algorithm
+            .parameters
+            .ok_or_else(|| anyhow::anyhow!("Missing EC parameters"))?;
+        let der = params.to_der()?;
+        let curve_oid = ObjectIdentifier::from_der(&der)?;
+
+        match curve_oid {
+            // secp256r1 / prime256v1
+            NistP256::OID => {
+                let sk = P256SecretKey::from_pkcs8_der(private_der)?;
+                let pubkey = sk.public_key();
+                Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+            }
+            // secp384r1
+            NistP384::OID => {
+                let sk = P384SecretKey::from_pkcs8_der(private_der)?;
+                let pubkey = sk.public_key();
+                Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+            }
+            // secp521r1
+            NistP521::OID => {
+                let sk = P521SecretKey::from_pkcs8_der(private_der)?;
+                let pubkey = sk.public_key();
+                Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+            }
+
+            _ => bail!("Unsupported EC curve OID: {}", curve_oid),
+        }
+    }
+}
+
+fn get_list_der_from_pem<F>(pem_str: &str, mut f: F) -> Result<Vec<Vec<u8>>>
+where
+    F: FnMut(&pem::Pem) -> bool,
+{
+    let pems = pem::parse_many(pem_str)?;
+    let mut out = Vec::new();
+
+    for p in pems {
+        if f(&p) {
+            out.push(p.contents().to_vec());
+        }
+    }
+
+    if out.is_empty() {
+        bail!("No matching PEM blocks found");
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine, prelude::BASE64_STANDARD};
+    use elliptic_curve::rand_core;
+    use p256::SecretKey as P256SecretKey;
+    use p384::SecretKey as P384SecretKey;
+    use p521::SecretKey as P521SecretKey;
+    use pkcs8::EncodePrivateKey;
+    use tempfile::NamedTempFile;
+
+    /// Helper: wrap DER into PKCS#8 PEM
+    fn pkcs8_pem_from_der(der: &[u8]) -> String {
+        let b64 = BASE64_STANDARD.encode(der);
+        format!(
+            "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+            b64.as_bytes()
+                .chunks(64)
+                .map(|c| std::str::from_utf8(c).unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    }
+
+    #[test]
+    fn from_pem_ok() {
+        let sk = P256SecretKey::random(&mut rand_core::OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let pem = pkcs8_pem_from_der(der.as_bytes());
+
+        let key = ECPrivateKey::from_pem(&pem).unwrap();
+        assert!(!key.0.is_empty());
+    }
+
+    #[test]
+    fn from_pem_no_private_key() {
+        let pem = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----";
+
+        let err = ECPrivateKey::from_pem(pem).unwrap_err();
+        assert!(err.to_string().contains("No matching PEM blocks found"));
+    }
+
+    #[test]
+    fn load_privatekey_pem_ok() {
+        let sk = P384SecretKey::random(&mut rand_core::OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let pem = pkcs8_pem_from_der(der.as_bytes());
+
+        let file = NamedTempFile::new().unwrap();
+        fs::write(file.path(), pem).unwrap();
+
+        let key = ECPrivateKey::load_privatekey_pem(file.path()).unwrap();
+        assert!(!key.0.is_empty());
+    }
+
+    #[test]
+    fn extract_publickey_p256() {
+        let sk = P256SecretKey::random(&mut rand_core::OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let pubkey = key.extract_publickey().unwrap();
+
+        // Uncompressed EC point
+        assert_eq!(pubkey[0], 0x04);
+        assert_eq!(pubkey.len(), 65); // 1 + 32 + 32
+    }
+
+    #[test]
+    fn extract_publickey_p384() {
+        let sk = P384SecretKey::random(&mut rand_core::OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let pubkey = key.extract_publickey().unwrap();
+
+        assert_eq!(pubkey[0], 0x04);
+        assert_eq!(pubkey.len(), 97); // 1 + 48 + 48
+    }
+
+    #[test]
+    fn extract_publickey_p521() {
+        let sk = P521SecretKey::random(&mut rand_core::OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let pubkey = key.extract_publickey().unwrap();
+
+        assert_eq!(pubkey[0], 0x04);
+        assert_eq!(pubkey.len(), 133); // 1 + 66 + 66
+    }
+}

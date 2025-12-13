@@ -1,4 +1,8 @@
-mod ec;
+mod certificate;
+mod privatekey;
+
+#[cfg(test)]
+mod test;
 
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
@@ -7,7 +11,8 @@ use pkcs8::DecodePrivateKey;
 
 use p384::SecretKey as P384SecretKey;
 
-use crate::ec::{ECPrivateKey, ECX509Cert};
+use crate::certificate::ECX509Cert;
+use crate::privatekey::ECPrivateKey;
 
 fn main() -> anyhow::Result<()> {
     test_ec("ec256-cert.pem", "ec256-private.pem")?;
