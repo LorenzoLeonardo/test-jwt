@@ -4,9 +4,10 @@ use anyhow::{Result, anyhow, bail};
 use elliptic_curve::sec1::ToEncodedPoint;
 use pkcs8::{AssociatedOid, ObjectIdentifier};
 use time::OffsetDateTime;
-use x509_parser::prelude::{FromDer, X509Certificate};
 use x509_parser::{
-    oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY, prelude::ParsedExtension, time::ASN1Time,
+    oid_registry,
+    prelude::{FromDer, ParsedExtension, X509Certificate},
+    time::ASN1Time,
 };
 
 use p256::NistP256;
@@ -52,7 +53,7 @@ impl ECX509Cert {
         let spki = cert.public_key();
 
         // Ensure EC key
-        if spki.algorithm.algorithm != OID_KEY_TYPE_EC_PUBLIC_KEY {
+        if spki.algorithm.algorithm != oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY {
             bail!("Certificate public key is not EC");
         }
 
