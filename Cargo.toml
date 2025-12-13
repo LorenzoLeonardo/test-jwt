@@ -14,6 +14,7 @@ p521 = "0.13.3"
 pem = "3.0.6"
 pkcs8 = "0.10.2"
 test-case = "3.3.1"
+time = "0.3.44"
 x509-parser = "0.18"
 
 [dev-dependencies]

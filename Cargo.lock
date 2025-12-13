@@ -908,6 +908,7 @@ dependencies = [
  "rcgen",
  "tempfile",
  "test-case",
+ "time",
  "x509-parser",
 ]
 

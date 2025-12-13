@@ -10,8 +10,8 @@ use p384::SecretKey as P384SecretKey;
 use crate::ec::{ECPrivateKey, ECX509Cert};
 
 fn main() -> anyhow::Result<()> {
-    test_ec("ec384-cert.pem", "ec384-private.pem")?;
     test_ec("ec256-cert.pem", "ec256-private.pem")?;
+    test_ec("ec384-cert.pem", "ec384-private.pem")?;
     test_ec("ec521-cert.pem", "ec521-private.pem")?;
     Ok(())
 }
@@ -24,7 +24,7 @@ fn test_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
     let x509 = ECX509Cert::load_x509_pem(cert)?;
     let pubkey_from_cert = x509.extract_publickey(0)?;
     println!("Num Certs: {}", x509.get_num_certs());
-    display_der(&[&pubkey_from_cert]);
+    println!("{x509}");
 
     assert_eq!(pubkey_from_priv, pubkey_from_cert);
     Ok(())
