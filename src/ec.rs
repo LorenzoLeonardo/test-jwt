@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 use anyhow::{Result, anyhow, bail};
 use elliptic_curve::sec1::ToEncodedPoint;
 use pkcs8::{
-    DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
+    AssociatedOid, DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
     der::{Decode, Encode},
 };
 use x509_parser::oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY;
@@ -12,6 +12,10 @@ use x509_parser::prelude::{FromDer, X509Certificate};
 use p256::SecretKey as P256SecretKey;
 use p384::SecretKey as P384SecretKey;
 use p521::SecretKey as P521SecretKey;
+
+use p256::NistP256;
+use p384::NistP384;
+use p521::NistP521;
 
 #[derive(Debug)]
 pub struct ECX509Cert(Vec<Vec<u8>>);
@@ -67,28 +71,31 @@ impl ECX509Cert {
             .as_oid()
             .map_err(|_| anyhow!("EC parameters are not a named curve"))?
             .to_id_string();
+        let curve_oid =
+            ObjectIdentifier::new(&curve_oid).map_err(|_| anyhow!("Invalid EC Curve OID"))?;
 
         let spk_bytes = &spki.subject_public_key.data;
 
         if spk_bytes.is_empty() {
             bail!("Empty EC public key");
         }
+
         // Auto-select curve
-        let pub_key = match curve_oid.as_str() {
+        let pub_key = match curve_oid {
             // P-256
-            "1.2.840.10045.3.1.7" => {
+            NistP256::OID => {
                 let pk = p256::PublicKey::from_sec1_bytes(spk_bytes)
                     .map_err(|_| anyhow!("Invalid P-256 public key"))?;
                 pk.to_encoded_point(false).as_bytes().into()
             }
             // P-384
-            "1.3.132.0.34" => {
+            NistP384::OID => {
                 let pk = p384::PublicKey::from_sec1_bytes(spk_bytes)
                     .map_err(|_| anyhow!("Invalid P-384 public key"))?;
                 pk.to_encoded_point(false).as_bytes().into()
             }
             // P-521
-            "1.3.132.0.35" => {
+            NistP521::OID => {
                 let pk = p521::PublicKey::from_sec1_bytes(spk_bytes)
                     .map_err(|_| anyhow!("Invalid P-521 public key"))?;
                 pk.to_encoded_point(false).as_bytes().into()
