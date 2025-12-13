@@ -3,15 +3,54 @@ use std::fs;
 use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
-use p384::SecretKey;
-use p384::elliptic_curve::sec1::ToEncodedPoint;
-use p384::pkcs8::DecodePrivateKey;
+use elliptic_curve::sec1::ToEncodedPoint;
+use pkcs8::{
+    DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
+    der::{Decode, Encode},
+};
 use x509_parser::oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 use p256::SecretKey as P256SecretKey;
 use p384::SecretKey as P384SecretKey;
 use p521::SecretKey as P521SecretKey;
+
+/// Extract EC public key (uncompressed SEC1) from a PKCS#8 EC private key
+pub fn extract_ec_public_key_from_private_key(private_der: &[u8]) -> Result<Vec<u8>> {
+    // Parse PKCS#8 only once
+    let pk_info = PrivateKeyInfo::from_der(private_der)?;
+    let params = pk_info
+        .algorithm
+        .parameters
+        .ok_or_else(|| anyhow::anyhow!("Missing EC parameters"))?;
+    let der = params.to_der()?;
+    let curve_oid = ObjectIdentifier::from_der(&der)?;
+
+    match curve_oid.to_string().as_str() {
+        // secp256r1 / prime256v1
+        "1.2.840.10045.3.1.7" => {
+            let sk = P256SecretKey::from_pkcs8_der(private_der)?;
+            let pubkey = sk.public_key();
+            Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+        }
+
+        // secp384r1
+        "1.3.132.0.34" => {
+            let sk = P384SecretKey::from_pkcs8_der(private_der)?;
+            let pubkey = sk.public_key();
+            Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+        }
+
+        // secp521r1
+        "1.3.132.0.35" => {
+            let sk = P521SecretKey::from_pkcs8_der(private_der)?;
+            let pubkey = sk.public_key();
+            Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+        }
+
+        _ => bail!("Unsupported EC curve OID: {}", curve_oid),
+    }
+}
 
 pub fn get_list_der_from_pem<F>(pem_str: &str, mut f: F) -> Result<Vec<Vec<u8>>>
 where
@@ -49,7 +88,7 @@ pub fn display_der(list: &[&[u8]]) {
             }
 
             if (i + 1) % 15 == 0 {
-                print!("\n");
+                println!();
             }
         }
         println!("\n");
@@ -62,7 +101,7 @@ pub fn display_der(list: &[&[u8]]) {
     }
 }
 
-fn print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
+fn _print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
     let pem = pem::parse(pem_str)?;
 
     let b64 = BASE64_STANDARD.encode(pem.contents());
@@ -87,20 +126,20 @@ fn print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
         }
 
         if (i + 1) % 15 == 0 {
-            print!("\n");
+            println!();
         }
     }
 
     println!();
     // Parse EC private key
-    let sk = P384SecretKey::from_pkcs8_der(&pem.contents())?;
+    let sk = P384SecretKey::from_pkcs8_der(pem.contents())?;
     let sk_bytes = sk.to_bytes();
 
     println!("\n=== EC PRIVATE KEY (P-384 / secp384r1) ===");
     println!("Private-Key: (384 bit)");
 
     // Show private scalar in hex, OpenSSL style
-    print!("priv:\n");
+    println!("priv:");
     for (i, byte) in sk_bytes.iter().enumerate() {
         if i % 15 == 0 {
             print!("    "); // indentation like OpenSSL
@@ -115,7 +154,7 @@ fn print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
 
         // New line every 15 bytes
         if (i + 1) % 15 == 0 {
-            print!("\n");
+            println!();
         }
     }
     println!();
@@ -125,7 +164,7 @@ fn print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
     let encoded = pk.to_encoded_point(false);
     let pub_bytes = encoded.as_bytes();
 
-    print!("pub:\n");
+    println!("pub:");
     for (i, byte) in pub_bytes.iter().enumerate() {
         if i % 15 == 0 {
             print!("    "); // indentation like OpenSSL
@@ -140,7 +179,7 @@ fn print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
 
         // New line every 15 bytes
         if (i + 1) % 15 == 0 {
-            print!("\n");
+            println!();
         }
     }
     println!();
@@ -148,33 +187,6 @@ fn print_ec384_private_key(pem_str: &str) -> anyhow::Result<()> {
     println!("NIST CURVE: P-384");
 
     Ok(())
-}
-
-pub fn extract_ec384_public_key_from_private_key(private_der: &[u8]) -> Result<Vec<u8>> {
-    // Try P-256
-    if let Ok(sk) = P256SecretKey::from_pkcs8_der(private_der) {
-        let pk = sk.public_key();
-        let encoded = pk.to_encoded_point(false);
-        return Ok(encoded.as_bytes().to_vec());
-    }
-
-    // Try P-384
-    if let Ok(sk) = P384SecretKey::from_pkcs8_der(private_der) {
-        let pk = sk.public_key();
-        let encoded = pk.to_encoded_point(false);
-        return Ok(encoded.as_bytes().to_vec());
-    }
-
-    // Try P-521
-    if let Ok(sk) = P521SecretKey::from_pkcs8_der(private_der) {
-        let pk = sk.public_key();
-        let encoded = pk.to_encoded_point(false);
-        return Ok(encoded.as_bytes().to_vec());
-    }
-
-    Err(anyhow!(
-        "Failed to parse EC private key for known curves (P-256, P-384, P-521)"
-    ))
 }
 
 pub fn extract_ec_public_key_from_cert_der(cert_der: &[u8]) -> Result<Vec<u8>> {
@@ -245,7 +257,7 @@ fn test_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
     let refs: Vec<&[u8]> = list.iter().map(|v| v.as_slice()).collect();
     display_der(&refs);
 
-    let pubkey_from_priv = extract_ec384_public_key_from_private_key(&list[0])?;
+    let pubkey_from_priv = extract_ec_public_key_from_private_key(&list[0])?;
     display_der(&[&pubkey_from_priv]);
 
     let pem_str = fs::read_to_string(cert)?;
@@ -261,7 +273,7 @@ fn test_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    //test_ec("ec384-cert.pem", "ec384-private.pem")?;
+    test_ec("ec384-cert.pem", "ec384-private.pem")?;
     test_ec("ec256-cert.pem", "ec256-private.pem")?;
     Ok(())
 }

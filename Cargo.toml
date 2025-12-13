@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 base64 = "0.22.1"
+elliptic-curve = "0.13.8"
 jsonwebtoken = { version = "10.2.0", features =["default", "aws_lc_rs"]}
 p256 = "0.13.2"
 p384 = "0.13.1"
