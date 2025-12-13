@@ -9,4 +9,5 @@ base64 = "0.22.1"
 jsonwebtoken = { version = "10.2.0", features =["default", "aws_lc_rs"]}
 p384 = "0.13.1"
 pem = "3.0.6"
+x509-parser = "0.18"
 
