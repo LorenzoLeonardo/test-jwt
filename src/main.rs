@@ -1,4 +1,5 @@
 mod certificate;
+mod display;
 mod privatekey;
 
 #[cfg(test)]
