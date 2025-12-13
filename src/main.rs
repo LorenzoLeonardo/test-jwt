@@ -1,11 +1,11 @@
 use std::fs;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
+use p384::SecretKey;
 use p384::elliptic_curve::sec1::ToEncodedPoint;
 use p384::pkcs8::DecodePrivateKey;
-use p384::{PublicKey, SecretKey};
 use x509_parser::oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -157,25 +157,61 @@ pub fn extract_ec384_public_key_from_private_key(private_der: &[u8]) -> Result<V
     Ok(pub_bytes.into())
 }
 
-pub fn extract_ec384_public_key_from_cert_der(cert_der: &[u8]) -> Result<Vec<u8>> {
+pub fn extract_ec_public_key_from_cert_der(cert_der: &[u8]) -> Result<Vec<u8>> {
+    // Parse certificate
     let (_, cert) = X509Certificate::from_der(cert_der)
-        .map_err(|_| anyhow::anyhow!("Invalid X.509 certificate"))?;
+        .map_err(|_| anyhow!("Invalid X.509 certificate DER"))?;
 
     let spki = cert.public_key();
 
-    // Ensure EC public key
+    // Ensure EC key
     if spki.algorithm.algorithm != OID_KEY_TYPE_EC_PUBLIC_KEY {
         bail!("Certificate public key is not EC");
     }
 
-    // Extract SEC1 EC point (04 || X || Y)
-    let ec_point = spki.subject_public_key.data.clone();
+    // Extract EC parameters (named curve)
+    let params = spki
+        .algorithm
+        .parameters
+        .as_ref()
+        .ok_or_else(|| anyhow!("Missing EC parameters"))?;
 
-    // Validate curve = P-384
-    let pk = PublicKey::from_sec1_bytes(&ec_point)
-        .map_err(|_| anyhow::anyhow!("Not a valid P-384 public key"))?;
+    let curve_oid = params
+        .as_oid()
+        .map_err(|_| anyhow!("EC parameters are not a named curve"))?
+        .to_id_string();
 
-    Ok(pk.to_encoded_point(false).as_bytes().to_vec())
+    let spk_bytes = &spki.subject_public_key.data;
+
+    if spk_bytes.is_empty() {
+        bail!("Empty EC public key");
+    }
+
+    // Auto-select curve
+    let pub_key = match curve_oid.as_str() {
+        // P-256
+        "1.2.840.10045.3.1.7" => {
+            let pk = p256::PublicKey::from_sec1_bytes(spk_bytes)
+                .map_err(|_| anyhow!("Invalid P-256 public key"))?;
+            pk.to_encoded_point(false).as_bytes().into()
+        }
+        // P-384
+        "1.3.132.0.34" => {
+            let pk = p384::PublicKey::from_sec1_bytes(spk_bytes)
+                .map_err(|_| anyhow!("Invalid P-384 public key"))?;
+            pk.to_encoded_point(false).as_bytes().into()
+        }
+        // P-521
+        "1.3.132.0.35" => {
+            let pk = p521::PublicKey::from_sec1_bytes(spk_bytes)
+                .map_err(|_| anyhow!("Invalid P-521 public key"))?;
+            pk.to_encoded_point(false).as_bytes().into()
+        }
+
+        _ => bail!("Unsupported EC curve OID: {}", curve_oid),
+    };
+
+    Ok(pub_key)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -195,7 +231,7 @@ fn main() -> anyhow::Result<()> {
     let refs: Vec<&[u8]> = list.iter().map(|v| v.as_slice()).collect();
     display_der(&refs);
 
-    let pubkey_from_cert = extract_ec384_public_key_from_cert_der(&list[0])?;
+    let pubkey_from_cert = extract_ec_public_key_from_cert_der(&list[0])?;
     display_der(&[&pubkey_from_cert]);
 
     assert_eq!(pubkey_from_priv, pubkey_from_cert);

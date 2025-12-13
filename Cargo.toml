@@ -7,7 +7,9 @@ edition = "2024"
 anyhow = "1.0.100"
 base64 = "0.22.1"
 jsonwebtoken = { version = "10.2.0", features =["default", "aws_lc_rs"]}
+p256 = "0.13.2"
 p384 = "0.13.1"
+p521 = "0.13.3"
 pem = "3.0.6"
 x509-parser = "0.18"
 
