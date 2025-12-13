@@ -144,23 +144,21 @@ impl ECPrivateKey {
         let der = params.to_der()?;
         let curve_oid = ObjectIdentifier::from_der(&der)?;
 
-        match curve_oid.to_string().as_str() {
+        match curve_oid {
             // secp256r1 / prime256v1
-            "1.2.840.10045.3.1.7" => {
+            NistP256::OID => {
                 let sk = P256SecretKey::from_pkcs8_der(private_der)?;
                 let pubkey = sk.public_key();
                 Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
             }
-
             // secp384r1
-            "1.3.132.0.34" => {
+            NistP384::OID => {
                 let sk = P384SecretKey::from_pkcs8_der(private_der)?;
                 let pubkey = sk.public_key();
                 Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
             }
-
             // secp521r1
-            "1.3.132.0.35" => {
+            NistP521::OID => {
                 let sk = P521SecretKey::from_pkcs8_der(private_der)?;
                 let pubkey = sk.public_key();
                 Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
@@ -403,5 +401,19 @@ mod tests {
 
         assert_eq!(pubkey[0], 0x04);
         assert_eq!(pubkey.len(), 133); // 1 + 66 + 66
+    }
+
+    #[test_case::test_case("ec384-cert.pem", "ec384-private.pem")]
+    #[test_case::test_case("ec256-cert.pem", "ec256-private.pem")]
+    #[test_case::test_case("ec521-cert.pem", "ec521-private.pem")]
+    fn test_actual_file_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
+        let private_key = ECPrivateKey::load_privatekey_pem(privkey).unwrap();
+        let pubkey_from_priv = private_key.extract_publickey().unwrap();
+
+        let x509 = ECX509Cert::load_x509_pem(cert).unwrap();
+        let pubkey_from_cert = x509.extract_publickey(0).unwrap();
+
+        assert_eq!(pubkey_from_priv, pubkey_from_cert);
+        Ok(())
     }
 }
