@@ -136,6 +136,8 @@ mod tests {
     use super::*;
     use elliptic_curve::sec1::FromEncodedPoint;
     use rcgen::{CertificateParams, KeyPair};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     fn make_ec_cert_der(curve: &str) -> Vec<u8> {
         let alg = match curve {
@@ -256,5 +258,88 @@ mod tests {
         let err = certs.extract_publickey(1).unwrap_err();
 
         assert!(err.to_string().contains("Index out of bounds"));
+    }
+
+    #[test]
+    fn deref_exposes_der_slices() {
+        let der = make_ec_cert_der("P256");
+        let certs = wrap_single_cert(der.clone());
+
+        assert_eq!(certs.len(), 1);
+        assert_eq!(certs[0], der);
+    }
+
+    #[test]
+    fn load_x509_pem_from_file() {
+        let der = make_ec_cert_der("P256");
+        let pem = pem::encode(&pem::Pem::new("CERTIFICATE", der));
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(pem.as_bytes()).unwrap();
+
+        let certs = ECX509Cert::load_x509_pem(file.path()).unwrap();
+        assert_eq!(certs.get_num_certs(), 1);
+    }
+
+    #[test]
+    fn pem_with_no_certificates_is_rejected() {
+        let pem = pem::encode(&pem::Pem::new("PRIVATE KEY", b"nope".to_vec()));
+        let err = ECX509Cert::from_pem(&pem).unwrap_err();
+
+        assert!(err.to_string().contains("No matching PEM blocks"));
+    }
+
+    #[test]
+    fn invalid_pem_is_rejected() {
+        let err = ECX509Cert::from_pem("-----BEGIN GARBAGE-----").unwrap_err();
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn mixed_ec_and_rsa_certificates() {
+        let ec = make_ec_cert_der("P256");
+        let rsa = make_rsa_cert_der();
+
+        let pem = format!(
+            "{}{}",
+            pem::encode(&pem::Pem::new("CERTIFICATE", ec)),
+            pem::encode(&pem::Pem::new("CERTIFICATE", rsa)),
+        );
+
+        let certs = ECX509Cert::from_pem(&pem).unwrap();
+        assert_eq!(certs.get_num_certs(), 2);
+
+        // EC works
+        assert_eq!(certs.extract_publickey(0).unwrap().len(), 65);
+
+        // RSA fails
+        let err = certs.extract_publickey(1).unwrap_err();
+        assert!(err.to_string().contains("not EC"));
+    }
+
+    #[test]
+    fn missing_ec_parameters_is_rejected() {
+        // Corrupt SPKI parameters by truncating DER
+        let mut der = make_ec_cert_der("P256");
+        der.truncate(der.len() / 2);
+
+        let certs = wrap_single_cert(der);
+        let err = certs.extract_publickey(0).unwrap_err();
+
+        assert!(
+            err.to_string().contains("Invalid X.509")
+                || err.to_string().contains("Missing EC parameters")
+        );
+    }
+
+    #[test]
+    fn extract_publickey_error_messages_are_stable() {
+        let certs = wrap_single_cert(make_rsa_cert_der());
+        let err = certs.extract_publickey(0).unwrap_err().to_string();
+
+        assert!(
+            err.contains("EC"),
+            "error message should mention EC, got: {err}"
+        );
     }
 }
