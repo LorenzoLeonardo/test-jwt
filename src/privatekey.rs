@@ -26,7 +26,9 @@ impl ECPrivateKey {
     }
 
     pub fn from_pem(pem_str: &str) -> Result<Self> {
-        let ders = get_list_der_from_pem(pem_str, |pem| pem.tag() == "PRIVATE KEY")?;
+        let ders = get_list_der_from_pem(pem_str, |pem| {
+            pem.tag() == "PRIVATE KEY" || pem.tag() == "EC PRIVATE KEY"
+        })?;
 
         let der = ders
             .into_iter()
@@ -43,35 +45,55 @@ impl ECPrivateKey {
     pub fn extract_publickey(&self) -> Result<Vec<u8>> {
         let private_der = &self.0;
         // Parse PKCS#8 only once
-        let pk_info = PrivateKeyInfo::from_der(private_der)?;
-        let params = pk_info
-            .algorithm
-            .parameters
-            .ok_or_else(|| anyhow::anyhow!("Missing EC parameters"))?;
-        let der = params.to_der()?;
-        let curve_oid = ObjectIdentifier::from_der(&der)?;
+        if let Ok(pk_info) = PrivateKeyInfo::from_der(private_der) {
+            let params = pk_info
+                .algorithm
+                .parameters
+                .ok_or_else(|| anyhow::anyhow!("Missing EC parameters"))?;
+            let der = params.to_der()?;
+            let curve_oid = ObjectIdentifier::from_der(&der)?;
 
-        match curve_oid {
-            // secp256r1 / prime256v1
-            NistP256::OID => {
-                let sk = P256SecretKey::from_pkcs8_der(private_der)?;
-                let pubkey = sk.public_key();
-                Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+            match curve_oid {
+                // secp256r1 / prime256v1
+                NistP256::OID => {
+                    let sk = P256SecretKey::from_pkcs8_der(private_der)?;
+                    let pubkey = sk.public_key();
+                    Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+                }
+                // secp384r1
+                NistP384::OID => {
+                    let sk = P384SecretKey::from_pkcs8_der(private_der)?;
+                    let pubkey = sk.public_key();
+                    Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+                }
+                // secp521r1
+                NistP521::OID => {
+                    let sk = P521SecretKey::from_pkcs8_der(private_der)?;
+                    let pubkey = sk.public_key();
+                    Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+                }
+
+                _ => bail!("Unsupported EC curve OID: {}", curve_oid),
             }
-            // secp384r1
-            NistP384::OID => {
-                let sk = P384SecretKey::from_pkcs8_der(private_der)?;
+        } else {
+            // If PKCS#8 parsing fails, try SEC1 parsing directly (old style EC PRIVATE KEY)
+            // Try parsing as P256
+            if let Ok(sk) = P256SecretKey::from_sec1_der(private_der) {
                 let pubkey = sk.public_key();
-                Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+                return Ok(pubkey.to_encoded_point(false).as_bytes().to_vec());
             }
-            // secp521r1
-            NistP521::OID => {
-                let sk = P521SecretKey::from_pkcs8_der(private_der)?;
+            // Try parsing as P384
+            if let Ok(sk) = P384SecretKey::from_sec1_der(private_der) {
                 let pubkey = sk.public_key();
-                Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+                return Ok(pubkey.to_encoded_point(false).as_bytes().to_vec());
+            }
+            // Try parsing as P521
+            if let Ok(sk) = P521SecretKey::from_sec1_der(private_der) {
+                let pubkey = sk.public_key();
+                return Ok(pubkey.to_encoded_point(false).as_bytes().to_vec());
             }
 
-            _ => bail!("Unsupported EC curve OID: {}", curve_oid),
+            bail!("Failed to parse EC private key in either PKCS#8 or SEC1 format");
         }
     }
 }
