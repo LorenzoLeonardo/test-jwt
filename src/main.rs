@@ -12,6 +12,7 @@ fn main() -> anyhow::Result<()> {
     test_ec("ec256-cert.pem", "ec256-private.pem")?;
     test_ec("ec384-cert.pem", "ec384-private.pem")?;
     test_ec("ec521-cert.pem", "ec521-private.pem")?;
+    test_ec("ec256-oldcert.pem", "ec256-oldprivate.pem")?;
     test_ec("ec384-oldcert.pem", "ec384-oldprivate.pem")?;
     Ok(())
 }
