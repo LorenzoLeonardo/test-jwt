@@ -2,13 +2,15 @@ use std::fmt;
 
 use time::OffsetDateTime;
 use x509_parser::{
-    asn1_rs::Oid,
+    asn1_rs::{Oid, oid},
     oid_registry,
     prelude::{FromDer, ParsedExtension, X509Certificate},
     time::ASN1Time,
 };
 
 use crate::{certificate::ECX509Cert, privatekey::ECPrivateKey};
+
+pub const OID_NIST_EC_P224: Oid<'static> = oid!(1.3.132.0.33);
 
 impl fmt::Display for ECX509Cert {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -201,6 +203,8 @@ pub fn signature_algorithm_name<'a>(oid: &Oid<'a>) -> String {
         "dsa-with-SHA1".into()
     } else if *oid == oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY {
         "id-ecPublicKey".into()
+    } else if *oid == OID_NIST_EC_P224 {
+        "secp224r1".into()
     } else if *oid == oid_registry::OID_EC_P256 {
         "prime256v1".into()
     } else if *oid == oid_registry::OID_NIST_EC_P384 {
@@ -219,6 +223,8 @@ fn num_bit<'a>(oid: &Oid<'a>) -> usize {
         384
     } else if *oid == oid_registry::OID_EC_P256 {
         256
+    } else if *oid == OID_NIST_EC_P224 {
+        224
     } else {
         0
     }

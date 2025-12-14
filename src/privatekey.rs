@@ -7,10 +7,12 @@ use pkcs8::{
     der::{Decode, Encode},
 };
 
+use p224::SecretKey as P224SecretKey;
 use p256::SecretKey as P256SecretKey;
 use p384::SecretKey as P384SecretKey;
 use p521::SecretKey as P521SecretKey;
 
+use p224::NistP224;
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
@@ -54,7 +56,13 @@ impl ECPrivateKey {
             let curve_oid = ObjectIdentifier::from_der(&der)?;
 
             match curve_oid {
-                // secp256r1 / prime256v1
+                // secp224r1
+                NistP224::OID => {
+                    let sk = P224SecretKey::from_pkcs8_der(private_der)?;
+                    let pubkey = sk.public_key();
+                    Ok(pubkey.to_encoded_point(false).as_bytes().to_vec())
+                }
+                // prime256v1
                 NistP256::OID => {
                     let sk = P256SecretKey::from_pkcs8_der(private_der)?;
                     let pubkey = sk.public_key();
@@ -77,6 +85,11 @@ impl ECPrivateKey {
             }
         } else {
             // If PKCS#8 parsing fails, try SEC1 parsing directly (old style EC PRIVATE KEY)
+            // Try parsing as P224
+            if let Ok(sk) = P224SecretKey::from_sec1_der(private_der) {
+                let pubkey = sk.public_key();
+                return Ok(pubkey.to_encoded_point(false).as_bytes().to_vec());
+            }
             // Try parsing as P256
             if let Ok(sk) = P256SecretKey::from_sec1_der(private_der) {
                 let pubkey = sk.public_key();
@@ -102,6 +115,9 @@ impl ECPrivateKey {
         let der = &self.0;
 
         // Try PKCS#8 parse first, then get raw scalar bytes from SecretKey
+        if let Ok(sk) = P224SecretKey::from_pkcs8_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
         if let Ok(sk) = P256SecretKey::from_pkcs8_der(der) {
             return Ok(sk.to_bytes().to_vec());
         }
@@ -113,6 +129,9 @@ impl ECPrivateKey {
         }
 
         // Try SEC1 parse as fallback
+        if let Ok(sk) = P224SecretKey::from_sec1_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
         if let Ok(sk) = P256SecretKey::from_sec1_der(der) {
             return Ok(sk.to_bytes().to_vec());
         }
@@ -135,6 +154,7 @@ impl ECPrivateKey {
             let der = params.to_der()?;
             if let Ok(oid) = ObjectIdentifier::from_der(&der) {
                 let friendly = match oid {
+                    NistP224::OID => "P-224",
                     NistP256::OID => "P-256",
                     NistP384::OID => "P-384",
                     NistP521::OID => "P-521",
@@ -147,6 +167,7 @@ impl ECPrivateKey {
         // Guess by private key length fallback
         let priv_len = self.extract_private_key_bytes()?.len();
         let (oid_str, friendly_name) = match priv_len {
+            28 => ("secp224r1".to_string(), "P-224".to_string()),
             32 => ("prime256v1".to_string(), "P-256".to_string()),
             48 => ("secp384r1".to_string(), "P-384".to_string()),
             66 => ("secp521r1".to_string(), "P-521".to_string()),

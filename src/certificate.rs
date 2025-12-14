@@ -8,6 +8,7 @@ use x509_parser::{
     prelude::{FromDer, X509Certificate},
 };
 
+use p224::NistP224;
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
@@ -77,6 +78,12 @@ impl ECX509Cert {
 
         // Auto-select curve
         let pub_key = match curve_oid {
+            // P-224
+            NistP224::OID => {
+                let pk = p224::PublicKey::from_sec1_bytes(spk_bytes)
+                    .map_err(|_| anyhow!("Invalid P-224 public key"))?;
+                pk.to_encoded_point(false).as_bytes().into()
+            }
             // P-256
             NistP256::OID => {
                 let pk = p256::PublicKey::from_sec1_bytes(spk_bytes)
