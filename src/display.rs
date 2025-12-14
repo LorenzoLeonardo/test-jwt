@@ -8,7 +8,7 @@ use x509_parser::{
     time::ASN1Time,
 };
 
-use crate::certificate::ECX509Cert;
+use crate::{certificate::ECX509Cert, privatekey::ECPrivateKey};
 
 impl fmt::Display for ECX509Cert {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -221,5 +221,32 @@ fn num_bit<'a>(oid: &Oid<'a>) -> usize {
         256
     } else {
         0
+    }
+}
+
+impl fmt::Display for ECPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (
+            self.extract_private_key_bytes(),
+            self.extract_publickey(),
+            self.extract_curve_oid_and_name(),
+        ) {
+            (Ok(priv_bytes), Ok(pub_bytes), Ok((oid, curve))) => {
+                writeln!(f, "Private-Key: ({} bit)", priv_bytes.len() * 8)?;
+
+                writeln!(f, "priv:")?;
+                for chunk in priv_bytes.chunks(15) {
+                    writeln!(f, "    {}", hex_colon(chunk))?;
+                }
+                writeln!(f, "pub:")?;
+                for chunk in pub_bytes.chunks(15) {
+                    writeln!(f, "    {}", hex_colon(chunk))?;
+                }
+                writeln!(f, "ASN1 OID: {}", oid)?;
+                writeln!(f, "NIST CURVE: {}", curve)?;
+                Ok(())
+            }
+            _ => write!(f, "<Failed to display ECPrivateKey>"),
+        }
     }
 }

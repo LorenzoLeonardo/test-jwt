@@ -96,6 +96,64 @@ impl ECPrivateKey {
             bail!("Failed to parse EC private key in either PKCS#8 or SEC1 format");
         }
     }
+
+    /// Try to get raw private key bytes from SecretKey API
+    pub fn extract_private_key_bytes(&self) -> Result<Vec<u8>> {
+        let der = &self.0;
+
+        // Try PKCS#8 parse first, then get raw scalar bytes from SecretKey
+        if let Ok(sk) = P256SecretKey::from_pkcs8_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
+        if let Ok(sk) = P384SecretKey::from_pkcs8_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
+        if let Ok(sk) = P521SecretKey::from_pkcs8_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
+
+        // Try SEC1 parse as fallback
+        if let Ok(sk) = P256SecretKey::from_sec1_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
+        if let Ok(sk) = P384SecretKey::from_sec1_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
+        if let Ok(sk) = P521SecretKey::from_sec1_der(der) {
+            return Ok(sk.to_bytes().to_vec());
+        }
+
+        bail!("Failed to parse EC private key to extract raw bytes");
+    }
+
+    /// Extract the curve OID string and friendly curve name from PKCS#8 info
+    pub fn extract_curve_oid_and_name(&self) -> Result<(String, String)> {
+        // Try PKCS#8 parse for OID
+        if let Ok(pk_info) = pkcs8::PrivateKeyInfo::from_der(&self.0)
+            && let Some(params) = &pk_info.algorithm.parameters
+        {
+            let der = params.to_der()?;
+            if let Ok(oid) = ObjectIdentifier::from_der(&der) {
+                let friendly = match oid {
+                    NistP256::OID => "P-256",
+                    NistP384::OID => "P-384",
+                    NistP521::OID => "P-521",
+                    _ => "Unknown",
+                };
+                return Ok((oid.to_string(), friendly.to_string()));
+            }
+        }
+
+        // Guess by private key length fallback
+        let priv_len = self.extract_private_key_bytes()?.len();
+        let (oid_str, friendly_name) = match priv_len {
+            32 => ("prime256v1".to_string(), "P-256".to_string()),
+            48 => ("secp384r1".to_string(), "P-384".to_string()),
+            66 => ("secp521r1".to_string(), "P-521".to_string()),
+            _ => ("Unknown".to_string(), "Unknown".to_string()),
+        };
+        Ok((oid_str, friendly_name))
+    }
 }
 
 fn get_list_der_from_pem<F>(pem_str: &str, mut f: F) -> Result<Vec<Vec<u8>>>
