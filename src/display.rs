@@ -88,8 +88,17 @@ fn dump_cert(f: &mut fmt::Formatter<'_>, cert: &X509Certificate) -> fmt::Result 
         signature_algorithm_name(&spki.algorithm.algorithm)
     )?;
 
+    const UNKNOWN_OID_BYTES: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d];
+    let oid = if let Some(params) = &spki.algorithm.parameters {
+        match params.as_oid() {
+            Ok(oid) => oid,
+            Err(_) => Oid::new(std::borrow::Cow::Borrowed(UNKNOWN_OID_BYTES)),
+        }
+    } else {
+        Oid::new(std::borrow::Cow::Borrowed(UNKNOWN_OID_BYTES))
+    };
     let pubkey = &spki.subject_public_key.data;
-    writeln!(f, "                Public-Key: ({} bit)", pubkey.len() * 8)?;
+    writeln!(f, "                Public-Key: ({} bit)", num_bit(&oid))?;
     writeln!(f, "                pub:")?;
     for chunk in pubkey.chunks(15) {
         writeln!(f, "                    {}", hex_colon(chunk))?;
@@ -200,5 +209,17 @@ pub fn signature_algorithm_name<'a>(oid: &Oid<'a>) -> String {
         "secp521r1".into()
     } else {
         oid.to_id_string()
+    }
+}
+
+fn num_bit<'a>(oid: &Oid<'a>) -> usize {
+    if *oid == oid_registry::OID_NIST_EC_P521 {
+        521
+    } else if *oid == oid_registry::OID_NIST_EC_P384 {
+        384
+    } else if *oid == oid_registry::OID_EC_P256 {
+        256
+    } else {
+        0
     }
 }
