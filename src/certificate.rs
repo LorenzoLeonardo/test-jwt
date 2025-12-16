@@ -46,12 +46,18 @@ impl ECX509Cert {
     pub fn num_certs(&self) -> usize {
         self.ders.len()
     }
+    #[allow(unused)]
+    pub fn certs(&self) -> Result<Vec<X509Certificate<'_>>> {
+        let mut out = Vec::with_capacity(self.ders.len());
 
-    /* =========================
-     * Internal helpers
-     * ========================= */
+        for i in 0..self.ders.len() {
+            out.push(self.cert_at(i)?);
+        }
 
-    fn cert_at(&self, index: usize) -> Result<X509Certificate<'_>> {
+        Ok(out)
+    }
+    #[allow(unused)]
+    pub fn cert_at(&self, index: usize) -> Result<X509Certificate<'_>> {
         let der = self
             .ders
             .get(index)
@@ -260,6 +266,25 @@ pub fn verify_leaf_signed_by_ca(
     Ok(())
 }
 
+#[allow(unused)]
+pub fn verify_leaf_signed_by_ca_bundle(
+    leaf: &X509Certificate<'_>,
+    ca_bundle: &[X509Certificate<'_>],
+) -> Result<()> {
+    let mut last_err: Option<anyhow::Error> = None;
+
+    for ca in ca_bundle {
+        match verify_leaf_signed_by_ca(leaf, ca) {
+            Ok(()) => return Ok(()), // ✅ success with this CA
+            Err(e) => last_err = Some(e),
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| {
+        anyhow!("Leaf certificate could not be verified by any CA in the bundle")
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +466,13 @@ mod tests {
         let leaf = ECX509Cert::load_x509_pem(leaf).unwrap();
 
         verify_leaf_signed_by_ca(&leaf.cert_at(0).unwrap(), &ca.cert_at(0).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn verify_leaf_from_ca_bundle() {
+        let ca = ECX509Cert::load_x509_pem("test-pki/ca-bundle.pem").unwrap();
+        let leaf = ECX509Cert::load_x509_pem("test-pki/leaf-cert.pem").unwrap();
+
+        verify_leaf_signed_by_ca_bundle(&leaf.cert_at(0).unwrap(), &ca.certs().unwrap()).unwrap();
     }
 }
