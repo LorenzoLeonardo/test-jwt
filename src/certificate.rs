@@ -95,11 +95,7 @@ impl ECX509Cert {
 
         let curve_oid = params
             .as_oid()
-            .map_err(|_| anyhow!("EC parameters are not a named curve"))?
-            .to_id_string();
-
-        let curve_oid =
-            ObjectIdentifier::new(&curve_oid).map_err(|_| anyhow!("Invalid curve OID"))?;
+            .map_err(|_| anyhow!("EC parameters are not named curve"))?;
 
         let sec1_bytes = spki.subject_public_key.data.to_vec();
 
@@ -108,7 +104,8 @@ impl ECX509Cert {
         }
 
         Ok(EcPublicKey {
-            curve_oid,
+            curve_oid: ObjectIdentifier::new(&curve_oid.to_id_string())
+                .map_err(|_| anyhow!("Invalid curve OID"))?,
             sec1_bytes,
         })
     }
@@ -153,11 +150,14 @@ pub fn verify_leaf_signed_by_ca(
      * 2. Ensure ECDSA signature
      * ========================= */
     let sig_alg = &leaf.signature_algorithm.algorithm;
-    if sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA224
-        && sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA256
-        && sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA384
-        && sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA512
-    {
+    let allowed = [
+        &oid_registry::OID_SIG_ECDSA_WITH_SHA224,
+        &oid_registry::OID_SIG_ECDSA_WITH_SHA256,
+        &oid_registry::OID_SIG_ECDSA_WITH_SHA384,
+        &oid_registry::OID_SIG_ECDSA_WITH_SHA512,
+    ];
+
+    if !allowed.contains(&sig_alg) {
         bail!("Unsupported signature algorithm");
     }
 
