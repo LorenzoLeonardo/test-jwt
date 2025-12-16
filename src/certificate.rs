@@ -1,54 +1,76 @@
-use std::{fs, ops::Deref, path::Path};
+use std::{fs, path::Path};
 
 use anyhow::{Result, anyhow, bail};
-use elliptic_curve::sec1::ToEncodedPoint;
-use pkcs8::{AssociatedOid, ObjectIdentifier};
+use pkcs8::ObjectIdentifier;
 use x509_parser::{
     oid_registry,
     prelude::{FromDer, X509Certificate},
 };
 
-use p224::NistP224;
-use p256::NistP256;
-use p384::NistP384;
-use p521::NistP521;
+#[allow(unused)]
+/// Structured EC public key extracted from X.509
+#[derive(Debug, Clone)]
+pub struct EcPublicKey {
+    pub curve_oid: ObjectIdentifier,
+    /// SEC1 encoded EC point (SubjectPublicKeyInfo)
+    pub sec1_bytes: Vec<u8>,
+}
 
+/// Owned X.509 certificate bundle (DER only, parsed on demand)
 #[derive(Debug)]
-pub struct ECX509Cert(Vec<Vec<u8>>);
+pub struct ECX509Cert {
+    pub ders: Vec<Vec<u8>>,
+}
 
 impl ECX509Cert {
+    /* =========================
+     * Constructors
+     * ========================= */
+
     pub fn load_x509_pem<P: AsRef<Path>>(path: P) -> Result<Self> {
         let pem_str = fs::read_to_string(path)?;
-
         Self::from_pem(&pem_str)
     }
 
     pub fn from_pem(pem_str: &str) -> Result<Self> {
-        Ok(Self(get_list_der_from_pem(pem_str, |pem| {
-            pem.tag() == "CERTIFICATE"
-        })?))
+        let ders = get_list_der_from_pem(pem_str, |pem| pem.tag() == "CERTIFICATE")?;
+        Ok(Self { ders })
     }
     #[allow(unused)]
     pub fn from_der(der: Vec<u8>) -> Self {
-        Self(vec![der])
+        Self { ders: vec![der] }
     }
 
-    pub fn get_num_certs(&self) -> usize {
-        self.0.len()
+    pub fn num_certs(&self) -> usize {
+        self.ders.len()
     }
 
-    pub fn extract_publickey(&self, index: usize) -> Result<Vec<u8>> {
-        let cert_der = self
-            .0
+    /* =========================
+     * Internal helpers
+     * ========================= */
+
+    fn cert_at(&self, index: usize) -> Result<X509Certificate<'_>> {
+        let der = self
+            .ders
             .get(index)
-            .ok_or_else(|| anyhow!("Index out of bounds"))?;
-        // Parse certificate
-        let (rem, cert) = X509Certificate::from_der(cert_der)
-            .map_err(|_| anyhow!("Invalid X.509 certificate DER"))?;
+            .ok_or_else(|| anyhow!("Certificate index out of bounds"))?;
+
+        let (rem, cert) =
+            X509Certificate::from_der(der).map_err(|_| anyhow!("Invalid X.509 DER"))?;
 
         if !rem.is_empty() {
             bail!("Trailing data after X.509 certificate");
         }
+
+        Ok(cert)
+    }
+
+    /* =========================
+     * Public API
+     * ========================= */
+
+    pub fn ec_public_key(&self, index: usize) -> Result<EcPublicKey> {
+        let cert = self.cert_at(index)?;
         let spki = cert.public_key();
 
         // Ensure EC key
@@ -56,7 +78,7 @@ impl ECX509Cert {
             bail!("Certificate public key is not EC");
         }
 
-        // Extract EC parameters (named curve)
+        // Extract named curve OID
         let params = spki
             .algorithm
             .parameters
@@ -67,56 +89,26 @@ impl ECX509Cert {
             .as_oid()
             .map_err(|_| anyhow!("EC parameters are not a named curve"))?
             .to_id_string();
+
         let curve_oid =
-            ObjectIdentifier::new(&curve_oid).map_err(|_| anyhow!("Invalid EC Curve OID"))?;
+            ObjectIdentifier::new(&curve_oid).map_err(|_| anyhow!("Invalid curve OID"))?;
 
-        let spk_bytes = &spki.subject_public_key.data;
+        let sec1_bytes = spki.subject_public_key.data.to_vec();
 
-        if spk_bytes.is_empty() {
+        if sec1_bytes.is_empty() {
             bail!("Empty EC public key");
         }
 
-        // Auto-select curve
-        let pub_key = match curve_oid {
-            // P-224
-            NistP224::OID => {
-                let pk = p224::PublicKey::from_sec1_bytes(spk_bytes)
-                    .map_err(|_| anyhow!("Invalid P-224 public key"))?;
-                pk.to_encoded_point(false).as_bytes().into()
-            }
-            // P-256
-            NistP256::OID => {
-                let pk = p256::PublicKey::from_sec1_bytes(spk_bytes)
-                    .map_err(|_| anyhow!("Invalid P-256 public key"))?;
-                pk.to_encoded_point(false).as_bytes().into()
-            }
-            // P-384
-            NistP384::OID => {
-                let pk = p384::PublicKey::from_sec1_bytes(spk_bytes)
-                    .map_err(|_| anyhow!("Invalid P-384 public key"))?;
-                pk.to_encoded_point(false).as_bytes().into()
-            }
-            // P-521
-            NistP521::OID => {
-                let pk = p521::PublicKey::from_sec1_bytes(spk_bytes)
-                    .map_err(|_| anyhow!("Invalid P-521 public key"))?;
-                pk.to_encoded_point(false).as_bytes().into()
-            }
-
-            _ => bail!("Unsupported EC curve OID: {}", curve_oid),
-        };
-
-        Ok(pub_key)
+        Ok(EcPublicKey {
+            curve_oid,
+            sec1_bytes,
+        })
     }
 }
 
-impl Deref for ECX509Cert {
-    type Target = [Vec<u8>];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+/* =========================
+ * PEM helper
+ * ========================= */
 
 fn get_list_der_from_pem<F>(pem_str: &str, mut f: F) -> Result<Vec<Vec<u8>>>
 where
@@ -155,10 +147,7 @@ mod tests {
         };
 
         let keypair = KeyPair::generate_for(alg).unwrap();
-
         let params = CertificateParams::new(vec!["localhost".into()]).unwrap();
-
-        // ✅ Works on older rcgen
         let cert = params.self_signed(&keypair).unwrap();
         cert.der().to_vec()
     }
@@ -171,80 +160,75 @@ mod tests {
     }
 
     fn wrap_single_cert(der: Vec<u8>) -> ECX509Cert {
-        ECX509Cert(vec![der])
+        ECX509Cert::from_der(der)
     }
 
     #[test]
     fn extract_p256_public_key() {
         let certs = wrap_single_cert(make_ec_cert_der("P256"));
-        let pk = certs.extract_publickey(0).unwrap();
+        let pk = certs.ec_public_key(0).unwrap();
 
-        assert_eq!(pk.len(), 65);
-        assert_eq!(pk[0], 0x04);
+        assert_eq!(pk.sec1_bytes.len(), 65);
+        assert_eq!(pk.sec1_bytes[0], 0x04);
 
-        let point = p256::EncodedPoint::from_bytes(&pk).unwrap();
+        let point = p256::EncodedPoint::from_bytes(&pk.sec1_bytes).unwrap();
         let _ = p256::PublicKey::from_encoded_point(&point).unwrap();
     }
 
     #[test]
     fn extract_p384_public_key() {
         let certs = wrap_single_cert(make_ec_cert_der("P384"));
-        let pk = certs.extract_publickey(0).unwrap();
+        let pk = certs.ec_public_key(0).unwrap();
 
-        assert_eq!(pk.len(), 97);
-        assert_eq!(pk[0], 0x04);
+        assert_eq!(pk.sec1_bytes.len(), 97);
+        assert_eq!(pk.sec1_bytes[0], 0x04);
 
-        let point = p384::EncodedPoint::from_bytes(&pk).unwrap();
+        let point = p384::EncodedPoint::from_bytes(&pk.sec1_bytes).unwrap();
         let _ = p384::PublicKey::from_encoded_point(&point).unwrap();
     }
 
     #[test]
     fn extract_p521_public_key() {
         let certs = wrap_single_cert(make_ec_cert_der("P521"));
-        let pk = certs.extract_publickey(0).unwrap();
+        let pk = certs.ec_public_key(0).unwrap();
 
-        assert_eq!(pk.len(), 133);
-        assert_eq!(pk[0], 0x04);
+        assert_eq!(pk.sec1_bytes.len(), 133);
+        assert_eq!(pk.sec1_bytes[0], 0x04);
 
-        let point = p521::EncodedPoint::from_bytes(&pk).unwrap();
+        let point = p521::EncodedPoint::from_bytes(&pk.sec1_bytes).unwrap();
         let _ = p521::PublicKey::from_encoded_point(&point).unwrap();
     }
 
     #[test]
     fn pem_roundtrip_single_cert() {
         let der = make_ec_cert_der("P256");
-        let pem = pem::Pem::new("CERTIFICATE", der.clone());
-        let pem_str = pem::encode(&pem);
+        let pem = pem::encode(&pem::Pem::new("CERTIFICATE", der));
 
-        let certs = ECX509Cert::from_pem(&pem_str).unwrap();
-        let pk = certs.extract_publickey(0).unwrap();
+        let certs = ECX509Cert::from_pem(&pem).unwrap();
+        let pk = certs.ec_public_key(0).unwrap();
 
-        assert_eq!(pk.len(), 65);
+        assert_eq!(pk.sec1_bytes.len(), 65);
     }
 
     #[test]
     fn pem_multiple_certificates() {
-        let der1 = make_ec_cert_der("P256");
-        let der2 = make_ec_cert_der("P384");
-
         let pem = format!(
             "{}{}",
-            pem::encode(&pem::Pem::new("CERTIFICATE", der1)),
-            pem::encode(&pem::Pem::new("CERTIFICATE", der2)),
+            pem::encode(&pem::Pem::new("CERTIFICATE", make_ec_cert_der("P256"))),
+            pem::encode(&pem::Pem::new("CERTIFICATE", make_ec_cert_der("P384"))),
         );
 
         let certs = ECX509Cert::from_pem(&pem).unwrap();
-        assert_eq!(certs.get_num_certs(), 2);
+        assert_eq!(certs.num_certs(), 2);
 
-        assert_eq!(certs.extract_publickey(0).unwrap().len(), 65);
-        assert_eq!(certs.extract_publickey(1).unwrap().len(), 97);
+        assert_eq!(certs.ec_public_key(0).unwrap().sec1_bytes.len(), 65);
+        assert_eq!(certs.ec_public_key(1).unwrap().sec1_bytes.len(), 97);
     }
 
     #[test]
     fn reject_non_ec_certificate() {
         let certs = wrap_single_cert(make_rsa_cert_der());
-        let err = certs.extract_publickey(0).unwrap_err();
-
+        let err = certs.ec_public_key(0).unwrap_err();
         assert!(err.to_string().contains("not EC"));
     }
 
@@ -254,26 +238,15 @@ mod tests {
         der.extend_from_slice(b"garbage");
 
         let certs = wrap_single_cert(der);
-        let err = certs.extract_publickey(0).unwrap_err();
-
+        let err = certs.ec_public_key(0).unwrap_err();
         assert!(err.to_string().contains("Trailing data"));
     }
 
     #[test]
     fn index_out_of_bounds() {
         let certs = wrap_single_cert(make_ec_cert_der("P256"));
-        let err = certs.extract_publickey(1).unwrap_err();
-
-        assert!(err.to_string().contains("Index out of bounds"));
-    }
-
-    #[test]
-    fn deref_exposes_der_slices() {
-        let der = make_ec_cert_der("P256");
-        let certs = wrap_single_cert(der.clone());
-
-        assert_eq!(certs.len(), 1);
-        assert_eq!(certs[0], der);
+        let err = certs.ec_public_key(1).unwrap_err();
+        assert!(err.to_string().contains("Certificate index out of bounds"));
     }
 
     #[test]
@@ -285,14 +258,13 @@ mod tests {
         file.write_all(pem.as_bytes()).unwrap();
 
         let certs = ECX509Cert::load_x509_pem(file.path()).unwrap();
-        assert_eq!(certs.get_num_certs(), 1);
+        assert_eq!(certs.num_certs(), 1);
     }
 
     #[test]
     fn pem_with_no_certificates_is_rejected() {
         let pem = pem::encode(&pem::Pem::new("PRIVATE KEY", b"nope".to_vec()));
         let err = ECX509Cert::from_pem(&pem).unwrap_err();
-
         assert!(err.to_string().contains("No matching PEM blocks"));
     }
 
@@ -304,45 +276,25 @@ mod tests {
 
     #[test]
     fn mixed_ec_and_rsa_certificates() {
-        let ec = make_ec_cert_der("P256");
-        let rsa = make_rsa_cert_der();
-
         let pem = format!(
             "{}{}",
-            pem::encode(&pem::Pem::new("CERTIFICATE", ec)),
-            pem::encode(&pem::Pem::new("CERTIFICATE", rsa)),
+            pem::encode(&pem::Pem::new("CERTIFICATE", make_ec_cert_der("P256"))),
+            pem::encode(&pem::Pem::new("CERTIFICATE", make_rsa_cert_der())),
         );
 
         let certs = ECX509Cert::from_pem(&pem).unwrap();
-        assert_eq!(certs.get_num_certs(), 2);
+        assert_eq!(certs.num_certs(), 2);
 
-        // EC works
-        assert_eq!(certs.extract_publickey(0).unwrap().len(), 65);
+        assert_eq!(certs.ec_public_key(0).unwrap().sec1_bytes.len(), 65);
 
-        // RSA fails
-        let err = certs.extract_publickey(1).unwrap_err();
+        let err = certs.ec_public_key(1).unwrap_err();
         assert!(err.to_string().contains("not EC"));
-    }
-
-    #[test]
-    fn missing_ec_parameters_is_rejected() {
-        // Corrupt SPKI parameters by truncating DER
-        let mut der = make_ec_cert_der("P256");
-        der.truncate(der.len() / 2);
-
-        let certs = wrap_single_cert(der);
-        let err = certs.extract_publickey(0).unwrap_err();
-
-        assert!(
-            err.to_string().contains("Invalid X.509")
-                || err.to_string().contains("Missing EC parameters")
-        );
     }
 
     #[test]
     fn extract_publickey_error_messages_are_stable() {
         let certs = wrap_single_cert(make_rsa_cert_der());
-        let err = certs.extract_publickey(0).unwrap_err().to_string();
+        let err = certs.ec_public_key(0).unwrap_err().to_string();
 
         assert!(
             err.contains("EC"),

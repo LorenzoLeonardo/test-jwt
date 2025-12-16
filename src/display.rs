@@ -14,7 +14,7 @@ pub const OID_NIST_EC_P224: Oid<'static> = oid!(1.3.132.0.33);
 
 impl fmt::Display for ECX509Cert {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (idx, der) in self.as_ref().iter().enumerate() {
+        for (idx, der) in self.ders.iter().enumerate() {
             let cert = match X509Certificate::from_der(der) {
                 Ok((_, cert)) => cert,
                 Err(e) => {
@@ -23,14 +23,14 @@ impl fmt::Display for ECX509Cert {
                 }
             };
 
-            if self.as_ref().len() > 1 {
+            if self.ders.len() > 1 {
                 writeln!(f, "Certificate {}:", idx)?;
             } else {
                 writeln!(f, "Certificate:")?;
             }
 
             dump_cert(f, &cert)?;
-            if idx + 1 < self.as_ref().len() {
+            if idx + 1 < self.ders.len() {
                 writeln!(f)?;
             }
         }

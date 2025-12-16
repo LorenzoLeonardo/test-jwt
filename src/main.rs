@@ -26,10 +26,10 @@ fn test_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
     println!("{private_key}");
 
     let x509 = ECX509Cert::load_x509_pem(cert)?;
-    let pubkey_from_cert = x509.extract_publickey(0)?;
-    println!("Num Certs: {}", x509.get_num_certs());
+    let pubkey_from_cert = x509.ec_public_key(0)?;
+    println!("Num Certs: {}", x509.num_certs());
     println!("{x509}");
 
-    assert_eq!(pubkey_from_priv, pubkey_from_cert);
+    assert_eq!(pubkey_from_priv, pubkey_from_cert.sec1_bytes);
     Ok(())
 }

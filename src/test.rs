@@ -14,8 +14,8 @@ fn test_actual_file_ec(cert: &str, privkey: &str) -> anyhow::Result<()> {
     let pubkey_from_priv = private_key.extract_publickey().unwrap();
 
     let x509 = ECX509Cert::load_x509_pem(cert).unwrap();
-    let pubkey_from_cert = x509.extract_publickey(0).unwrap();
+    let pubkey_from_cert = x509.ec_public_key(0).unwrap();
 
-    assert_eq!(pubkey_from_priv, pubkey_from_cert);
+    assert_eq!(pubkey_from_priv, pubkey_from_cert.sec1_bytes);
     Ok(())
 }
