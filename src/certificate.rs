@@ -288,7 +288,6 @@ pub fn verify_leaf_signed_by_ca_bundle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use elliptic_curve::sec1::FromEncodedPoint;
     use rcgen::{CertificateParams, KeyPair};
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -320,6 +319,8 @@ mod tests {
 
     #[test]
     fn extract_p256_public_key() {
+        use p256::elliptic_curve::sec1::FromEncodedPoint;
+
         let certs = wrap_single_cert(make_ec_cert_der("P256"));
         let pk = certs.ec_public_key(0).unwrap();
 
@@ -332,6 +333,8 @@ mod tests {
 
     #[test]
     fn extract_p384_public_key() {
+        use p384::elliptic_curve::sec1::FromEncodedPoint;
+
         let certs = wrap_single_cert(make_ec_cert_der("P384"));
         let pk = certs.ec_public_key(0).unwrap();
 
@@ -344,6 +347,8 @@ mod tests {
 
     #[test]
     fn extract_p521_public_key() {
+        use p521::elliptic_curve::sec1::FromEncodedPoint;
+
         let certs = wrap_single_cert(make_ec_cert_der("P521"));
         let pk = certs.ec_public_key(0).unwrap();
 

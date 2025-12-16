@@ -1,7 +1,6 @@
 use std::{fs, path::Path};
 
 use anyhow::{Result, anyhow, bail};
-use elliptic_curve::sec1::ToEncodedPoint;
 use pkcs8::{
     AssociatedOid, DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
     der::{Decode, Encode},
@@ -122,10 +121,22 @@ impl ParsedEcKey {
 
     fn public_key_bytes(&self) -> Vec<u8> {
         match self {
-            Self::P224(sk) => sk.public_key().to_encoded_point(false).as_bytes().to_vec(),
-            Self::P256(sk) => sk.public_key().to_encoded_point(false).as_bytes().to_vec(),
-            Self::P384(sk) => sk.public_key().to_encoded_point(false).as_bytes().to_vec(),
-            Self::P521(sk) => sk.public_key().to_encoded_point(false).as_bytes().to_vec(),
+            Self::P224(sk) => {
+                use p224::elliptic_curve::sec1::ToEncodedPoint;
+                sk.public_key().to_encoded_point(false).as_bytes().to_vec()
+            }
+            Self::P256(sk) => {
+                use p256::elliptic_curve::sec1::ToEncodedPoint;
+                sk.public_key().to_encoded_point(false).as_bytes().to_vec()
+            }
+            Self::P384(sk) => {
+                use p384::elliptic_curve::sec1::ToEncodedPoint;
+                sk.public_key().to_encoded_point(false).as_bytes().to_vec()
+            }
+            Self::P521(sk) => {
+                use p521::elliptic_curve::sec1::ToEncodedPoint;
+                sk.public_key().to_encoded_point(false).as_bytes().to_vec()
+            }
         }
     }
 
@@ -179,7 +190,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use elliptic_curve::rand_core::OsRng;
     use pkcs8::EncodePrivateKey;
     use tempfile::NamedTempFile;
 
@@ -189,6 +199,8 @@ mod tests {
 
     #[test]
     fn from_pem_ok() {
+        use p224::elliptic_curve::rand_core::OsRng;
+
         let sk = P256SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let pem = pem_from_pkcs8(der.as_bytes());
@@ -199,6 +211,8 @@ mod tests {
 
     #[test]
     fn load_privatekey_pem_ok() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
         let sk = P384SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let pem = pem_from_pkcs8(der.as_bytes());
@@ -212,6 +226,8 @@ mod tests {
 
     #[test]
     fn extract_publickey_p256() {
+        use p256::elliptic_curve::rand_core::OsRng;
+
         let sk = P256SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
@@ -223,6 +239,8 @@ mod tests {
 
     #[test]
     fn extract_publickey_p384() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
         let sk = P384SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
@@ -233,6 +251,8 @@ mod tests {
 
     #[test]
     fn extract_publickey_p521() {
+        use p521::elliptic_curve::rand_core::OsRng;
+
         let sk = P521SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
@@ -243,6 +263,8 @@ mod tests {
 
     #[test]
     fn extract_private_key_bytes_ok() {
+        use p256::elliptic_curve::rand_core::OsRng;
+
         let sk = P256SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
@@ -253,6 +275,8 @@ mod tests {
 
     #[test]
     fn extract_curve_oid_and_name_ok() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
         let sk = P384SecretKey::random(&mut OsRng);
         let der = sk.to_pkcs8_der().unwrap();
         let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
