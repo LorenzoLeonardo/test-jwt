@@ -378,4 +378,166 @@ mod tests {
         let extracted = key.extract_private_key_bytes().unwrap();
         assert_eq!(original_bytes.as_bytes(), extracted);
     }
+
+    #[test]
+    fn extract_private_key_bytes_p256() {
+        use p256::elliptic_curve::rand_core::OsRng;
+
+        let sk = P256SecretKey::random(&mut OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let raw = key.extract_private_key_bytes().unwrap();
+        assert_eq!(raw.len(), 32);
+    }
+
+    #[test]
+    fn extract_curve_oid_and_name_p256() {
+        use p256::elliptic_curve::rand_core::OsRng;
+
+        let sk = P256SecretKey::random(&mut OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let (oid, name) = key.extract_curve_oid_and_name().unwrap();
+        assert_eq!(oid, NistP256::OID.to_string());
+        assert_eq!(name, "P-256");
+    }
+
+    #[test]
+    fn sec1_p256_is_accepted() {
+        use p256::elliptic_curve::rand_core::OsRng;
+
+        let sk = P256SecretKey::random(&mut OsRng);
+        let sec1_der = sk.to_sec1_der().unwrap();
+        let key = ECPrivateKey::from_der(sec1_der.as_bytes().to_vec());
+
+        let pk = key.extract_publickey().unwrap();
+        let raw = key.extract_private_key_bytes().unwrap();
+
+        assert_eq!(pk.len(), 65);
+        assert_eq!(raw.len(), 32);
+    }
+
+    #[test]
+    fn p256_round_trip_private_key_matches() {
+        use p256::elliptic_curve::rand_core::OsRng;
+
+        let sk = P256SecretKey::random(&mut OsRng);
+        let original = sk.to_bytes();
+
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let extracted = key.extract_private_key_bytes().unwrap();
+        assert_eq!(original.as_bytes(), extracted);
+    }
+
+    #[test]
+    fn extract_private_key_bytes_p384() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
+        let sk = P384SecretKey::random(&mut OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let raw = key.extract_private_key_bytes().unwrap();
+        assert_eq!(raw.len(), 48);
+    }
+
+    #[test]
+    fn extract_curve_oid_and_name_p384_full() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
+        let sk = P384SecretKey::random(&mut OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let (oid, name) = key.extract_curve_oid_and_name().unwrap();
+        assert_eq!(oid, NistP384::OID.to_string());
+        assert_eq!(name, "P-384");
+    }
+
+    #[test]
+    fn sec1_p384_is_accepted() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
+        let sk = P384SecretKey::random(&mut OsRng);
+        let sec1_der = sk.to_sec1_der().unwrap();
+        let key = ECPrivateKey::from_der(sec1_der.as_bytes().to_vec());
+
+        let pk = key.extract_publickey().unwrap();
+        let raw = key.extract_private_key_bytes().unwrap();
+
+        assert_eq!(pk.len(), 97);
+        assert_eq!(raw.len(), 48);
+    }
+
+    #[test]
+    fn p384_round_trip_private_key_matches() {
+        use p384::elliptic_curve::rand_core::OsRng;
+
+        let sk = P384SecretKey::random(&mut OsRng);
+        let original = sk.to_bytes();
+
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let extracted = key.extract_private_key_bytes().unwrap();
+        assert_eq!(original.as_bytes(), extracted);
+    }
+
+    #[test]
+    fn extract_private_key_bytes_p521() {
+        use p521::elliptic_curve::rand_core::OsRng;
+
+        let sk = P521SecretKey::random(&mut OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let raw = key.extract_private_key_bytes().unwrap();
+        assert_eq!(raw.len(), 66);
+    }
+
+    #[test]
+    fn extract_curve_oid_and_name_p521() {
+        use p521::elliptic_curve::rand_core::OsRng;
+
+        let sk = P521SecretKey::random(&mut OsRng);
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let (oid, name) = key.extract_curve_oid_and_name().unwrap();
+        assert_eq!(oid, NistP521::OID.to_string());
+        assert_eq!(name, "P-521");
+    }
+
+    #[test]
+    fn sec1_p521_is_accepted() {
+        use p521::elliptic_curve::rand_core::OsRng;
+
+        let sk = P521SecretKey::random(&mut OsRng);
+        let sec1_der = sk.to_sec1_der().unwrap();
+        let key = ECPrivateKey::from_der(sec1_der.as_bytes().to_vec());
+
+        let pk = key.extract_publickey().unwrap();
+        let raw = key.extract_private_key_bytes().unwrap();
+
+        assert_eq!(pk.len(), 133);
+        assert_eq!(raw.len(), 66);
+    }
+
+    #[test]
+    fn p521_round_trip_private_key_matches() {
+        use p521::elliptic_curve::rand_core::OsRng;
+
+        let sk = P521SecretKey::random(&mut OsRng);
+        let original = sk.to_bytes();
+
+        let der = sk.to_pkcs8_der().unwrap();
+        let key = ECPrivateKey::from_der(der.as_bytes().to_vec());
+
+        let extracted = key.extract_private_key_bytes().unwrap();
+        assert_eq!(original.as_bytes(), extracted);
+    }
 }
