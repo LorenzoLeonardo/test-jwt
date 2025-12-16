@@ -1,8 +1,10 @@
 use std::{fs, path::Path};
 
 use anyhow::{Result, anyhow, bail};
+
 use pkcs8::ObjectIdentifier;
 use x509_parser::{
+    asn1_rs::{Oid, oid},
     oid_registry,
     prelude::{FromDer, X509Certificate},
 };
@@ -128,6 +130,134 @@ where
     }
 
     Ok(out)
+}
+#[allow(unused)]
+pub fn verify_leaf_signed_by_ca(
+    leaf: &X509Certificate<'_>,
+    ca: &X509Certificate<'_>,
+) -> Result<()> {
+    /* =========================
+     * 1. Issuer / Subject check
+     * ========================= */
+    if leaf.issuer() != ca.subject() {
+        bail!("Leaf issuer does not match CA subject");
+    }
+
+    /* =========================
+     * 2. Ensure ECDSA signature
+     * ========================= */
+    let sig_alg = &leaf.signature_algorithm.algorithm;
+    if sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA224
+        && sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA256
+        && sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA384
+        && sig_alg != &oid_registry::OID_SIG_ECDSA_WITH_SHA512
+    {
+        bail!("Unsupported signature algorithm");
+    }
+
+    /* =========================
+     * 3. Extract CA public key
+     * ========================= */
+    let spki = ca.public_key();
+
+    if spki.algorithm.algorithm != oid_registry::OID_KEY_TYPE_EC_PUBLIC_KEY {
+        bail!("CA public key is not EC");
+    }
+
+    let params = spki
+        .algorithm
+        .parameters
+        .as_ref()
+        .ok_or_else(|| anyhow!("Missing EC parameters"))?;
+
+    let curve_oid = params
+        .as_oid()
+        .map_err(|_| anyhow!("EC parameters are not named curve"))?;
+
+    let ca_pk_bytes = spki.subject_public_key.data.as_ref();
+
+    if ca_pk_bytes.is_empty() {
+        bail!("Empty CA public key");
+    }
+
+    /* =========================
+     * 4. Data & signature
+     * ========================= */
+    let tbs = leaf.tbs_certificate.as_ref();
+    let sig = leaf.signature_value.data.as_ref();
+
+    /* =========================
+     * 5. Curve dispatch
+     * ========================= */
+    // ===== P-224 =====
+    const OID_NIST_EC_P224: Oid<'static> = oid!(1.3.132.0.33);
+    if curve_oid == OID_NIST_EC_P224 {
+        use p224::{
+            EncodedPoint, NistP224,
+            ecdsa::{Signature, VerifyingKey, signature::Verifier},
+        };
+        let point = EncodedPoint::from_bytes(ca_pk_bytes)
+            .map_err(|_| anyhow!("Invalid P-224 public key"))?;
+
+        let vk = VerifyingKey::from_encoded_point(&point)
+            .map_err(|_| anyhow!("Invalid P-224 verifying key"))?;
+
+        let sig = Signature::from_der(sig).map_err(|_| anyhow!("Invalid ECDSA signature"))?;
+
+        vk.verify(tbs, &sig)
+            .map_err(|_| anyhow!("ECDSA verification failed"))?;
+    } else if curve_oid == oid_registry::OID_EC_P256 {
+        use p256::{
+            EncodedPoint, NistP256,
+            ecdsa::{Signature, VerifyingKey, signature::Verifier},
+        };
+        // ===== P-256 =====
+        let point = EncodedPoint::from_bytes(ca_pk_bytes)
+            .map_err(|_| anyhow!("Invalid P-256 public key"))?;
+
+        let vk = VerifyingKey::from_encoded_point(&point)
+            .map_err(|_| anyhow!("Invalid P-256 verifying key"))?;
+
+        let sig = Signature::from_der(sig).map_err(|_| anyhow!("Invalid ECDSA signature"))?;
+
+        vk.verify(tbs, &sig)
+            .map_err(|_| anyhow!("ECDSA verification failed"))?;
+    } else if curve_oid == oid_registry::OID_NIST_EC_P384 {
+        use p384::{
+            EncodedPoint, NistP384,
+            ecdsa::{Signature, VerifyingKey, signature::Verifier},
+        };
+        // ===== P-384 =====
+        let point = EncodedPoint::from_bytes(ca_pk_bytes)
+            .map_err(|_| anyhow!("Invalid P-384 public key"))?;
+
+        let vk = VerifyingKey::from_encoded_point(&point)
+            .map_err(|_| anyhow!("Invalid P-384 verifying key"))?;
+
+        let sig = Signature::from_der(sig).map_err(|_| anyhow!("Invalid ECDSA signature"))?;
+
+        vk.verify(tbs, &sig)
+            .map_err(|_| anyhow!("ECDSA verification failed"))?;
+    } else if curve_oid == oid_registry::OID_NIST_EC_P521 {
+        use p521::{
+            EncodedPoint, NistP521,
+            ecdsa::{Signature, VerifyingKey, signature::Verifier},
+        };
+        let point = EncodedPoint::from_bytes(ca_pk_bytes)
+            .map_err(|_| anyhow!("Invalid P-521 public key"))?;
+
+        let vk = VerifyingKey::from_encoded_point(&point)
+            .map_err(|_| anyhow!("Invalid P-521 verifying key"))?;
+
+        let sig = Signature::from_der(sig).map_err(|_| anyhow!("Invalid ECDSA P-521 signature"))?;
+
+        vk.verify(tbs, &sig)
+            .map_err(|_| anyhow!("ECDSA P-521 verification failed"))?;
+    } else {
+        bail!("Unsupported EC curve OID {curve_oid}")
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -300,5 +430,16 @@ mod tests {
             err.contains("EC"),
             "error message should mention EC, got: {err}"
         );
+    }
+
+    #[test_case::test_case("ec224/ca-cert.pem", "ec224/leaf-cert.pem")]
+    #[test_case::test_case("ec256/ca-cert.pem", "ec256/leaf-cert.pem")]
+    #[test_case::test_case("ec384/ca-cert.pem", "ec384/leaf-cert.pem")]
+    #[test_case::test_case("ec521/ca-cert.pem", "ec521/leaf-cert.pem")]
+    fn verify_leaf(ca: &str, leaf: &str) {
+        let ca = ECX509Cert::load_x509_pem(ca).unwrap();
+        let leaf = ECX509Cert::load_x509_pem(leaf).unwrap();
+
+        verify_leaf_signed_by_ca(&leaf.cert_at(0).unwrap(), &ca.cert_at(0).unwrap()).unwrap();
     }
 }
