@@ -9,14 +9,14 @@ use crate::certificate::ECX509Cert;
 use crate::privatekey::ECPrivateKey;
 
 fn main() -> anyhow::Result<()> {
-    test_ec("ec224-cert.pem", "ec224-private.pem")?;
-    test_ec("ec256-cert.pem", "ec256-private.pem")?;
-    test_ec("ec384-cert.pem", "ec384-private.pem")?;
-    test_ec("ec521-cert.pem", "ec521-private.pem")?;
-    test_ec("ec224-oldcert.pem", "ec224-oldprivate.pem")?;
-    test_ec("ec256-oldcert.pem", "ec256-oldprivate.pem")?;
-    test_ec("ec384-oldcert.pem", "ec384-oldprivate.pem")?;
-    test_ec("ec521-oldcert.pem", "ec521-oldprivate.pem")?;
+    test_ec("ec224/ec224-cert.pem", "ec224/ec224-private.pem")?;
+    test_ec("ec256/ec256-cert.pem", "ec256/ec256-private.pem")?;
+    test_ec("ec384/ec384-cert.pem", "ec384/ec384-private.pem")?;
+    test_ec("ec521/ec521-cert.pem", "ec521/ec521-private.pem")?;
+    test_ec("ec224/ec224-oldcert.pem", "ec224/ec224-oldprivate.pem")?;
+    test_ec("ec256/ec256-oldcert.pem", "ec256/ec256-oldprivate.pem")?;
+    test_ec("ec384/ec384-oldcert.pem", "ec384/ec384-oldprivate.pem")?;
+    test_ec("ec521/ec521-oldcert.pem", "ec521/ec521-oldprivate.pem")?;
     Ok(())
 }
 
